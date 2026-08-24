@@ -65,10 +65,29 @@ app.use((req, res, next) => {
 // OR GOOGLE_SERVICE_ACCOUNT_JSON env var
 const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 
-const auth = new google.auth.GoogleAuth({
-  keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS || 'credentials.json',
-  scopes: SCOPES,
-});
+let auth;
+if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+  try {
+    const creds = typeof process.env.GOOGLE_SERVICE_ACCOUNT_JSON === 'string'
+      ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
+      : process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+    auth = new google.auth.GoogleAuth({
+      credentials: creds,
+      scopes: SCOPES,
+    });
+  } catch (e) {
+    console.error('Failed to parse GOOGLE_SERVICE_ACCOUNT_JSON env var:', e);
+    auth = new google.auth.GoogleAuth({
+      keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS || 'credentials.json',
+      scopes: SCOPES,
+    });
+  }
+} else {
+  auth = new google.auth.GoogleAuth({
+    keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS || 'credentials.json',
+    scopes: SCOPES,
+  });
+}
 
 const sheets = google.sheets({ version: 'v4', auth });
 let SPREADSHEET_ID = process.env.SPREADSHEET_ID;
