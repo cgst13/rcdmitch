@@ -334,27 +334,26 @@ export const SettingsPage: React.FC = () => {
           </Box>
         </Box>
 
-        {/* Backend API / Google Apps Script Web App URL Card */}
-        <Box sx={{ mb: 3, p: 2, bgcolor: '#fef7e0', borderRadius: 1.5, border: '1px solid #feefc3' }}>
-          <Typography variant="caption" color="warning.dark" fontWeight="bold" sx={{ display: 'block', mb: 0.5 }}>
-            GOOGLE APPS SCRIPT WEB APP URL (REQUIRED FOR GITHUB PAGES ON OTHER DEVICES)
+        {/* Node Backend API Server URL Card */}
+        <Box sx={{ mb: 3, p: 2, bgcolor: '#f0f4f9', borderRadius: 1.5, border: '1px solid #d3e3fd' }}>
+          <Typography variant="caption" color="primary.main" fontWeight="bold" sx={{ display: 'block', mb: 0.5 }}>
+            NODE BACKEND SERVER URL (HTTPS)
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-            GitHub Pages is hosted over <strong>HTTPS</strong> and blocks unencrypted <code>http://localhost</code> connections on external devices. 
-            Deploying <code>scripts/GAS_CODE.js</code> as a Google Apps Script Web App gives you an <strong>HTTPS Web App URL</strong> accessible from any device anywhere!
+            GitHub Pages is hosted over <strong>HTTPS</strong> and requires an <strong>HTTPS Server URL</strong> (e.g. cloud hosted Node server on Render/Railway or localtunnel) to allow other devices to connect to your Node backend.
           </Typography>
           
           <TextField
             fullWidth
             size="small"
-            label="Google Apps Script Web App URL (HTTPS)"
-            placeholder="https://script.google.com/macros/s/AKfycb.../exec"
+            label="Node Server API URL (HTTPS)"
+            placeholder="https://your-node-backend.onrender.com or https://funny-cat-42.loca.lt"
             value={apiUrlInput}
             onChange={(e) => {
               setApiUrlInput(e.target.value);
               setApiUrl(e.target.value);
             }}
-            helperText="Paste your deployed Web App URL here to enable access from all devices."
+            helperText="Paste your HTTPS Node server URL here so other devices can connect."
           />
         </Box>
 
