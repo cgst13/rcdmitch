@@ -18,40 +18,40 @@ const sheets = google.sheets({ version: 'v4', auth });
  */
 async function ensureSpreadsheet(spreadsheetId) {
   let validId = spreadsheetId;
-  let isNew = false;
 
-  // 1. Check if spreadsheet exists
+  // 1. Check if spreadsheet exists and is accessible
   if (validId) {
     try {
       console.log(`Checking spreadsheet access for ID: ${validId}...`);
       await sheets.spreadsheets.get({ spreadsheetId: validId });
       console.log('Spreadsheet found and accessible.');
     } catch (error) {
-      console.warn(`Spreadsheet not accessible (Error: ${error.message}). Creating a new one...`);
-      validId = null; // Reset to force creation
+      const saEmail = 'credentials@rcd-lguconcepcion.iam.gserviceaccount.com';
+      console.warn(`Spreadsheet access check failed for ID ${validId}:`, error.message);
+      if (error.status === 403 || error.code === 403 || (error.message && error.message.toLowerCase().includes('permission'))) {
+        throw new Error(`Google Sheet is not shared with the Service Account. Please share your Google Sheet with Editor access to: ${saEmail}`);
+      }
+      if (error.status === 404 || error.code === 404 || (error.message && error.message.toLowerCase().includes('not found'))) {
+        throw new Error(`Google Sheet not found. Please verify the URL or ID.`);
+      }
+      throw new Error(`Unable to access Google Sheet (${error.message}). Please ensure it is shared with: ${saEmail}`);
     }
   }
 
-  // 2. Create if needed
+  // 2. If no ID provided, create a default one
   if (!validId) {
     try {
-      console.log('Creating new spreadsheet...');
-      const resource = {
-        properties: {
-          title: 'RCD System Database',
-        },
-      };
+      console.log('Creating new default spreadsheet...');
+      const resource = { properties: { title: 'RCD System Database' } };
       const spreadsheet = await sheets.spreadsheets.create({
         resource,
         fields: 'spreadsheetId',
       });
       validId = spreadsheet.data.spreadsheetId;
-      isNew = true;
       console.log(`New spreadsheet created with ID: ${validId}`);
-      console.log('IMPORTANT: Please share this sheet with your personal email if needed, or update the .env file.');
     } catch (error) {
-      console.error('Failed to create spreadsheet:', error);
-      throw error;
+      console.error('Failed to create default spreadsheet:', error.message);
+      throw new Error(`Failed to create new spreadsheet. Please create a sheet in Google Drive and paste its link above.`);
     }
   }
 

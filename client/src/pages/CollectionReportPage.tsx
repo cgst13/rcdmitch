@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
-import { 
+import {
   Box,
   Container,
   Typography,
@@ -23,7 +23,8 @@ import {
   Tooltip,
   Backdrop,
   CircularProgress,
-  TablePagination
+  TablePagination,
+  TableSortLabel
 } from '@mui/material';
 import { 
   AddCircleOutline, 
@@ -36,7 +37,9 @@ import {
   Save,
   Edit,
   Search,
-  Clear
+  Clear,
+  ExpandLess,
+  ExpandMore
 } from '@mui/icons-material';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Notification } from '../components/Notification';
@@ -58,29 +61,78 @@ const getNextOrNo = (currentOrNo: string): string => {
 };
 
 const parseDateToInputFormat = (dateStr: string): string => {
-  if (!dateStr) return new Date().toISOString().split('T')[0];
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   
-  // If already YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+  if (!dateStr) return today;
+  
+  const s = String(dateStr).trim();
 
-  // If M/D/YYYY or MM/DD/YYYY (US Format, common in Sheets)
-  // Assuming Month comes first. If your locale is different (DD/MM/YYYY), swap month and day.
-  const parts = dateStr.split('/');
-  if (parts.length === 3) {
-    const [month, day, year] = parts;
-    const m = month.padStart(2, '0');
-    const d = day.padStart(2, '0');
-    const y = year.length === 2 ? `20${year}` : year;
-    return `${y}-${m}-${d}`;
+  // 1. Handle ISO strings with 'T'
+  if (s.includes('T')) {
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) {
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const year = d.getFullYear();
+      return `${year}-${month}-${day}`;
+    }
+  }
+
+  // 2. Handle simple strings
+  const cleanStr = s.split(' ')[0];
+
+  // Try YYYY-MM-DD
+  const ymd = cleanStr.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (ymd) {
+    const [, y, m, d] = ymd;
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
   }
   
-  // Fallback to Date object parsing
-  const d = new Date(dateStr);
-  if (!isNaN(d.getTime())) {
-     return d.toISOString().split('T')[0];
+  // Try MM/DD/YYYY
+  const mdy = cleanStr.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (mdy) {
+    const [, m, d, y] = mdy;
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
+
+  return today;
+};
+
+const formatDisplayDate = (dateStr: string): string => {
+  if (!dateStr) return '';
+  
+  const s = String(dateStr).trim();
+
+  // 1. Handle ISO strings with 'T'
+  if (s.includes('T')) {
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) {
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const year = d.getFullYear();
+      return `${month}-${day}-${year}`;
+    }
+  }
+
+  // 2. Handle simple strings
+  const cleanStr = s.split(' ')[0];
+
+  // Try YYYY-MM-DD
+  const ymd = cleanStr.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (ymd) {
+    const [, y, m, d] = ymd;
+    return `${m.padStart(2, '0')}-${d.padStart(2, '0')}-${y}`;
   }
   
-  return new Date().toISOString().split('T')[0];
+  // Try MM/DD/YYYY
+  const mdy = cleanStr.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (mdy) {
+    const [, m, d, y] = mdy;
+    return `${m.padStart(2, '0')}-${d.padStart(2, '0')}-${y}`;
+  }
+
+  return cleanStr;
 };
 
 export const CollectionReportPage: React.FC = () => {
@@ -110,6 +162,9 @@ export const CollectionReportPage: React.FC = () => {
 
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [sortBy, setSortBy] = useState<'orNo' | 'date'>('date');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [expandedOrNos, setExpandedOrNos] = useState<string[]>([]);
 
   const [form, setForm] = useState({
     afNo: '',
@@ -207,7 +262,7 @@ export const CollectionReportPage: React.FC = () => {
   }, [items]);
 
   const filteredItems = useMemo(() => {
-    return items.filter(item => {
+    const result = items.filter(item => {
       // Search Term (General)
       const searchLower = searchTerm.toLowerCase();
       const matchesSearch = 
@@ -231,12 +286,63 @@ export const CollectionReportPage: React.FC = () => {
 
       return matchesSearch && matchesAf && matchesSub && matchesDate;
     });
-  }, [items, searchTerm, filterAfNo, filterSubCategory, filterDate]);
 
-  const visibleRows = useMemo(
-    () => filteredItems.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage),
-    [filteredItems, page, rowsPerPage]
+    return result.sort((a, b) => {
+      if (sortBy === 'orNo') {
+        const orA = parseInt(a.orNo || '0', 10);
+        const orB = parseInt(b.orNo || '0', 10);
+        return sortOrder === 'asc' ? orA - orB : orB - orA;
+      } else {
+        const dateA = new Date(a.date).getTime();
+        const dateB = new Date(b.date).getTime();
+        return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
+      }
+    });
+  }, [items, searchTerm, filterAfNo, filterSubCategory, filterDate, sortBy, sortOrder]);
+
+  const groupedItems = useMemo(() => {
+    const groups = new Map<string, {
+      orNo: string;
+      afNo: string;
+      payor: string;
+      date: string;
+      remarks: string;
+      charges: CollectionEntry[];
+      total: number;
+    }>();
+
+    filteredItems.forEach(item => {
+      const key = item.orNo || 'UNKNOWN';
+      const existing = groups.get(key);
+      if (existing) {
+        existing.charges.push(item);
+        existing.total += item.amount || 0;
+      } else {
+        groups.set(key, {
+          orNo: key,
+          afNo: item.afNo || '',
+          payor: item.payor || '',
+          date: item.date || '',
+          remarks: item.remarks || '',
+          charges: [item],
+          total: item.amount || 0
+        });
+      }
+    });
+
+    return Array.from(groups.values());
+  }, [filteredItems]);
+
+  const visibleGroups = useMemo(
+    () => groupedItems.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage),
+    [groupedItems, page, rowsPerPage]
   );
+
+  const toggleGroup = (orNo: string) => {
+    setExpandedOrNos(prev => 
+      prev.includes(orNo) ? prev.filter(item => item !== orNo) : [...prev, orNo]
+    );
+  };
 
   const handleEdit = (row: any) => {
     setEditingId(row.id);
@@ -670,19 +776,6 @@ export const CollectionReportPage: React.FC = () => {
                     }
                   }}
                 />
-                
-                <Button 
-                  variant="contained" 
-                  color={editingId ? "warning" : "primary"}
-                  startIcon={editingId ? <Edit /> : <Save />} 
-                  onClick={addItem}
-                  fullWidth
-                  size="large"
-                  disabled={loading}
-                  sx={{ mt: 2 }}
-                >
-                  {loading ? (editingId ? 'Updating...' : 'Saving...') : (editingId ? 'Update Entry' : 'Save Entry')}
-                </Button>
               </Stack>
             </Grid>
 
@@ -887,25 +980,38 @@ export const CollectionReportPage: React.FC = () => {
                 })}
                 
                 {!editingId && (
-                <Button
-                  startIcon={<AddCircleOutline />}
-                  onClick={() => {
-                    const newIdx = charges.length;
-                    setCharges([...charges, { subCategory: '', mainCategory: '', accountCode: '', amount: '' }]);
-                    setTimeout(() => {
-                      const el = subCategoryRefs.current[newIdx];
-                      if (el) {
-                        el.focus();
-                      }
-                    }, 100);
-                  }}
-                  fullWidth
-                  variant="outlined"
-                  sx={{ borderStyle: 'dashed', mt: 1 }}
-                >
-                  Add Charge
-                </Button>
+                  <Button
+                    startIcon={<AddCircleOutline />}
+                    onClick={() => {
+                      const newIdx = charges.length;
+                      setCharges([...charges, { subCategory: '', mainCategory: '', accountCode: '', amount: '' }]);
+                      setTimeout(() => {
+                        const el = subCategoryRefs.current[newIdx];
+                        if (el) {
+                          el.focus();
+                        }
+                      }, 100);
+                    }}
+                    fullWidth
+                    variant="outlined"
+                    sx={{ borderStyle: 'dashed', mt: 1 }}
+                  >
+                    Add Charge
+                  </Button>
                 )}
+
+                <Button 
+                  variant="contained" 
+                  color={editingId ? "warning" : "primary"}
+                  startIcon={editingId ? <Edit /> : <Save />} 
+                  onClick={addItem}
+                  fullWidth
+                  size="large"
+                  disabled={loading}
+                  sx={{ mt: 2 }}
+                >
+                  {loading ? (editingId ? 'Updating...' : 'Saving...') : (editingId ? 'Update Entry' : 'Save Entry')}
+                </Button>
               </Stack>
             </Grid>
           </Grid>
@@ -985,53 +1091,128 @@ export const CollectionReportPage: React.FC = () => {
           <Table>
             <TableHead sx={{ bgcolor: 'grey.100' }}>
               <TableRow>
-                <TableCell sx={{ fontWeight: 'bold' }}>ID</TableCell>
+                <TableCell sx={{ fontWeight: 'bold' }}></TableCell>
                 <TableCell sx={{ fontWeight: 'bold' }}>AF No.</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>OR No.</TableCell>
+                <TableCell sx={{ fontWeight: 'bold' }}>
+                  <TableSortLabel
+                    active={sortBy === 'orNo'}
+                    direction={sortBy === 'orNo' ? sortOrder : 'asc'}
+                    onClick={() => {
+                      if (sortBy === 'orNo') {
+                        setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                      } else {
+                        setSortBy('orNo');
+                        setSortOrder('asc');
+                      }
+                    }}
+                  >
+                    OR No.
+                  </TableSortLabel>
+                </TableCell>
                 <TableCell sx={{ fontWeight: 'bold' }}>Payor</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>Sub Category</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>Main Category</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>Account Code</TableCell>
-                <TableCell align="right" sx={{ fontWeight: 'bold' }}>Amount</TableCell>
+                <TableCell sx={{ fontWeight: 'bold' }}>
+                  <TableSortLabel
+                    active={sortBy === 'date'}
+                    direction={sortBy === 'date' ? sortOrder : 'asc'}
+                    onClick={() => {
+                      if (sortBy === 'date') {
+                        setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                      } else {
+                        setSortBy('date');
+                        setSortOrder('desc');
+                      }
+                    }}
+                  >
+                    Date
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell align="right" sx={{ fontWeight: 'bold' }}>Total</TableCell>
+                <TableCell sx={{ fontWeight: 'bold' }}>Charges</TableCell>
                 <TableCell sx={{ fontWeight: 'bold' }}>Remarks</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>Date</TableCell>
                 <TableCell sx={{ fontWeight: 'bold' }}>Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {visibleRows.map((row) => (
-                <TableRow key={row.id} hover>
-                  <TableCell>#{row.id}</TableCell>
-                  <TableCell>{row.afNo}</TableCell>
-                  <TableCell>{row.orNo}</TableCell>
-                  <TableCell>{row.payor}</TableCell>
-                  <TableCell>{row.subCategory}</TableCell>
-                  <TableCell>{row.mainCategory}</TableCell>
-                  <TableCell sx={{ fontFamily: 'monospace', bgcolor: 'grey.50', px: 1, borderRadius: 1 }}>{row.accountCode}</TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 'bold', color: 'success.main' }}>₱ {row.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</TableCell>
-                  <TableCell>{row.remarks}</TableCell>
-                  <TableCell>{row.date}</TableCell>
-                  <TableCell>
-                    <Stack direction="row" spacing={0}>
-                      <Tooltip title="Edit">
-                        <IconButton size="small" color="primary" onClick={() => handleEdit(row)}>
-                          <Edit fontSize="small" />
+              {visibleGroups.map((group) => {
+                const expanded = expandedOrNos.includes(group.orNo);
+                return (
+                  <React.Fragment key={group.orNo}>
+                    <TableRow hover>
+                      <TableCell>
+                        <IconButton size="small" onClick={() => toggleGroup(group.orNo)}>
+                          {expanded ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}
                         </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Delete">
-                        <IconButton size="small" color="error" onClick={() => confirmDelete(row.id)}>
-                          <DeleteOutline fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </Stack>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {items.length === 0 && (
+                      </TableCell>
+                      <TableCell>{group.afNo}</TableCell>
+                      <TableCell>{group.orNo}</TableCell>
+                      <TableCell>{group.payor}</TableCell>
+                      <TableCell>{formatDisplayDate(group.date)}</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 'bold', color: 'success.main' }}>
+                        ₱ {group.total.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                      </TableCell>
+                      <TableCell>{group.charges.length} charge{group.charges.length !== 1 ? 's' : ''}</TableCell>
+                      <TableCell>{group.remarks}</TableCell>
+                      <TableCell>
+                        <Tooltip title={expanded ? 'Collapse charges' : 'Expand charges'}>
+                          <IconButton size="small" onClick={() => toggleGroup(group.orNo)}>
+                            {expanded ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}
+                          </IconButton>
+                        </Tooltip>
+                      </TableCell>
+                    </TableRow>
+                    {expanded && (
+                      <TableRow>
+                        <TableCell colSpan={9} sx={{ bgcolor: 'grey.50', p: 0 }}>
+                          <Table size="small">
+                            <TableHead>
+                              <TableRow>
+                                <TableCell sx={{ fontWeight: 'bold' }}>Sub Category</TableCell>
+                                <TableCell sx={{ fontWeight: 'bold' }}>Main Category</TableCell>
+                                <TableCell sx={{ fontWeight: 'bold' }}>Account Code</TableCell>
+                                <TableCell align="right" sx={{ fontWeight: 'bold' }}>Amount</TableCell>
+                                <TableCell sx={{ fontWeight: 'bold' }}>Remarks</TableCell>
+                                <TableCell sx={{ fontWeight: 'bold' }}>Actions</TableCell>
+                              </TableRow>
+                            </TableHead>
+                            <TableBody>
+                              {group.charges.map((charge) => (
+                                <TableRow key={charge.id} hover>
+                                  <TableCell>{charge.subCategory}</TableCell>
+                                  <TableCell>{charge.mainCategory}</TableCell>
+                                  <TableCell sx={{ fontFamily: 'monospace', bgcolor: 'grey.100', px: 1, borderRadius: 1 }}>{charge.accountCode}</TableCell>
+                                  <TableCell align="right" sx={{ fontWeight: 'bold', color: 'success.main' }}>
+                                    ₱ {charge.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                                  </TableCell>
+                                  <TableCell>{charge.remarks}</TableCell>
+                                  <TableCell>
+                                    <Stack direction="row" spacing={0}>
+                                      <Tooltip title="Edit">
+                                        <IconButton size="small" color="primary" onClick={() => handleEdit(charge)}>
+                                          <Edit fontSize="small" />
+                                        </IconButton>
+                                      </Tooltip>
+                                      <Tooltip title="Delete">
+                                        <IconButton size="small" color="error" onClick={() => confirmDelete(charge.id)}>
+                                          <DeleteOutline fontSize="small" />
+                                        </IconButton>
+                                      </Tooltip>
+                                    </Stack>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+              {groupedItems.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={11} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
                     <Typography color="text.secondary" variant="body1">
-                      {loading ? 'Loading entries...' : 'No entries added yet.'}
+                      {loading ? 'Loading entries...' : 'No entries found.'}
                     </Typography>
                   </TableCell>
                 </TableRow>

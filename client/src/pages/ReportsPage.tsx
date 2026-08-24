@@ -16,11 +16,88 @@ import {
   Autocomplete,
   TextField,
   Grid,
-  TablePagination
+  TablePagination,
+  Menu,
+  MenuItem,
+  Divider
 } from '@mui/material';
-import { Download, Clear } from '@mui/icons-material';
+import { Download, Clear, FileDownload } from '@mui/icons-material';
 import { getCollectionEntries, getSignatories, getRPTCollections, type CollectionEntry } from '../services/googleSheets';
 import type { Signatory, RPTCollectionItem } from '../types/rcd';
+import * as XLSX from 'xlsx';
+
+const getBookletRange = (num: number) => {
+  const lastTwo = num % 100;
+  if (lastTwo >= 1 && lastTwo <= 50) {
+    const start = Math.floor(num / 100) * 100 + 1;
+    const end = start + 49;
+    return { start, end };
+  } else {
+    let start = Math.floor(num / 100) * 100 + 51;
+    if (lastTwo === 0) {
+      start = num - 49;
+    }
+    const end = start + 49;
+    return { start, end };
+  }
+};
+
+interface BookletAccountabilityEntry {
+  begQty: number;
+  begFrom: string;
+  begTo: string;
+  issQty: number;
+  issFrom: string;
+  issTo: string;
+  endQty?: number;
+  endFrom: string;
+  endTo: string;
+}
+
+const getBookletAccountability = (startOr: string, endOr: string, padLen = 7): BookletAccountabilityEntry[] => {
+  const formatOr = (num: number) => num.toString().padStart(padLen, '0');
+  const startNum = parseInt(startOr, 10);
+  const endNum = parseInt(endOr, 10);
+  if (isNaN(startNum) || isNaN(endNum) || startNum > endNum) {
+    return [];
+  }
+
+  const entries: BookletAccountabilityEntry[] = [];
+  let currentNum = startNum;
+
+  while (currentNum <= endNum) {
+    const booklet = getBookletRange(currentNum);
+    
+    const issStart = currentNum;
+    const issEnd = Math.min(endNum, booklet.end);
+
+    const begStart = issStart;
+    const begEnd = booklet.end;
+    const begQty = begEnd - begStart + 1;
+
+    const issQty = issEnd - issStart + 1;
+
+    const endStart = issEnd + 1;
+    const endEnd = booklet.end;
+    const endQty = endEnd - endStart + 1;
+
+    entries.push({
+      begQty,
+      begFrom: formatOr(begStart),
+      begTo: formatOr(begEnd),
+      issQty,
+      issFrom: formatOr(issStart),
+      issTo: formatOr(issEnd),
+      endQty: endQty > 0 ? endQty : undefined,
+      endFrom: endQty > 0 ? formatOr(endStart) : '',
+      endTo: endQty > 0 ? formatOr(endEnd) : ''
+    });
+
+    currentNum = booklet.end + 1;
+  }
+
+  return entries;
+};
 
 export const ReportsPage: React.FC = () => {
   const [collections, setCollections] = useState<CollectionEntry[]>([]);
@@ -57,6 +134,9 @@ export const ReportsPage: React.FC = () => {
   const [endOr1, setEndOr1] = useState<string | null>(null);
   const [startOr2, setStartOr2] = useState<string | null>(null);
   const [endOr2, setEndOr2] = useState<string | null>(null);
+
+  // Menu State for RPT Print Report
+  const [rptReportMenuAnchor, setRptReportMenuAnchor] = useState<null | HTMLElement>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -525,10 +605,7 @@ export const ReportsPage: React.FC = () => {
     }[] = [];
 
     if ((startOr1 && endOr1) || (startOr2 && endOr2)) {
-         const lastOrStr = validOrs.length > 0 ? validOrs[validOrs.length - 1] : (endOr2 || endOr1 || '0');
-         const lastOrNum = parseInt(lastOrStr, 10);
          const padLen = startOr1 ? startOr1.length : 7;
-         const formatOr = (num: number) => num.toString().padStart(padLen, '0');
 
          // Helper to process range data
          const getRangeData = (s: string, e: string) => {
@@ -546,137 +623,136 @@ export const ReportsPage: React.FC = () => {
              return { total, count: items.length };
          };
 
-         // Row 1
-         if (startOr1 && endOr1) {
-             const r1Data = getRangeData(startOr1, endOr1);
+          // Row 1
+          if (startOr1 && endOr1) {
+              const booklets = getBookletAccountability(startOr1, endOr1, padLen);
+              booklets.forEach(entry => {
+                  const entryData = getRangeData(entry.issFrom, entry.issTo);
+                  afList.push({
+                      name: 'A.F. NO. 51',
+                      minOr: entry.issFrom,
+                      maxOr: entry.issTo,
+                      amount: entryData.total,
+                      qty: entryData.count,
+                      
+                      begQty: entry.begQty,
+                      begFrom: entry.begFrom,
+                      begTo: entry.begTo,
+                      issQty: entry.issQty,
+                      issFrom: entry.issFrom,
+                      issTo: entry.issTo,
+                      endQty: entry.endQty,
+                      endFrom: entry.endFrom,
+                      endTo: entry.endTo
+                  });
+              });
+          }
+
+          // Row 2
+          if (startOr2 && endOr2) {
+              const booklets = getBookletAccountability(startOr2, endOr2, padLen);
+              booklets.forEach(entry => {
+                  const entryData = getRangeData(entry.issFrom, entry.issTo);
+                  afList.push({
+                      name: 'A.F. NO. 51',
+                      minOr: entry.issFrom,
+                      maxOr: entry.issTo,
+                      amount: entryData.total,
+                      qty: entryData.count,
+                      
+                      begQty: entry.begQty,
+                      begFrom: entry.begFrom,
+                      begTo: entry.begTo,
+                      issQty: entry.issQty,
+                      issFrom: entry.issFrom,
+                      issTo: entry.issTo,
+                      endQty: entry.endQty,
+                      endFrom: entry.endFrom,
+                      endTo: entry.endTo
+                  });
+              });
+          }
+     } else {
+         Object.entries(itemsByAf).forEach(([af, items]) => {
+             // Sort items by OR
+             items.sort((a, b) => {
+                  const orA = a.orNo || '';
+                  const orB = b.orNo || '';
+                  const numA = parseInt(orA, 10);
+                  const numB = parseInt(orB, 10);
+                  if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+                  return orA.localeCompare(orB);
+             });
+     
+             // Group into ranges
+             let currentRange: { min: string, max: string, amount: number, qty: number, lastOrNum: number } | null = null;
+             const rangesToProcess: { min: string, max: string }[] = [];
              
-             // Section C Logic - First Row
-             const begFromStr = startOr1;
-             const begToStr = lastOrStr;
-             const begFromNum = parseInt(begFromStr, 10);
-             const begToNum = parseInt(begToStr, 10);
-             const begQty = begToNum - begFromNum + 1;
-
-             const issFromStr = startOr1;
-             const issToStr = endOr1;
-             const issFromNum = parseInt(issFromStr, 10);
-             const issToNum = parseInt(issToStr, 10);
-             const issQty = issToNum - issFromNum + 1;
-
-             // Ending Balance: From Start OR 2 (or End 1 + 1) to Last OR
-             let endFromStr = '';
-             let endQty = 0;
-             if (startOr2) {
-                  endFromStr = startOr2;
-                  const endFromNum = parseInt(endFromStr, 10);
-                  endQty = Math.max(0, lastOrNum - endFromNum + 1);
-             } else {
-                  const endFromNum = parseInt(endOr1, 10) + 1;
-                  endFromStr = formatOr(endFromNum);
-                  endQty = Math.max(0, lastOrNum - endFromNum + 1);
+             for (const item of items) {
+                 const orVal = item.orNo || '';
+                 const orNum = parseInt(orVal, 10);
+     
+                 if (!currentRange) {
+                     currentRange = { min: orVal, max: orVal, amount: 0, qty: 1, lastOrNum: isNaN(orNum) ? -999999 : orNum };
+                 } else {
+                     const isConsecutive = !isNaN(orNum) && !isNaN(currentRange.lastOrNum) && (orNum === currentRange.lastOrNum + 1);
+                     
+                     if (isConsecutive) {
+                         currentRange.max = orVal;
+                         currentRange.lastOrNum = orNum;
+                     } else {
+                         rangesToProcess.push({ min: currentRange.min, max: currentRange.max });
+                         currentRange = { min: orVal, max: orVal, amount: 0, qty: 1, lastOrNum: isNaN(orNum) ? -999999 : orNum };
+                     }
+                 }
              }
              
-             afList.push({
-                 name: 'A.F. NO. 51',
-                 minOr: startOr1,
-                 maxOr: endOr1,
-                 amount: r1Data.total,
-                 qty: r1Data.count,
-                 
-                 begQty, begFrom: begFromStr, begTo: begToStr,
-                 issQty, issFrom: issFromStr, issTo: issToStr,
-                 endQty, endFrom: endFromStr, endTo: lastOrStr
-             });
-         }
+             if (currentRange) {
+                 rangesToProcess.push({ min: currentRange.min, max: currentRange.max });
+             }
 
-         // Row 2
-         if (startOr2 && endOr2) {
-             const r2Data = getRangeData(startOr2, endOr2);
-             
-             // Section C Logic - Second Row
-             const issFromStr = startOr2;
-             const issToStr = endOr2;
-             const issFromNum = parseInt(issFromStr, 10);
-             const issToNum = parseInt(issToStr, 10);
-             const issQty = issToNum - issFromNum + 1;
-             
-             const endFromNum = parseInt(endOr2, 10) + 1;
-             const endFromStr = formatOr(endFromNum);
-             const endQty = Math.max(0, lastOrNum - endFromNum + 1);
+             // Process each detected range using getBookletAccountability
+             rangesToProcess.forEach(range => {
+                 const padLen = range.min.length || 7;
+                 const booklets = getBookletAccountability(range.min, range.max, padLen);
+                 booklets.forEach(entry => {
+                     // Filter items for this booklet portion
+                     const startVal = parseInt(entry.issFrom, 10);
+                     const endVal = parseInt(entry.issTo, 10);
+                     const entryItems = items.filter(item => {
+                         const itemOr = parseInt(item.orNo || '', 10);
+                         return !isNaN(itemOr) && itemOr >= startVal && itemOr <= endVal;
+                     });
+                     const entryAmount = entryItems.reduce((sum, item) => sum + (item.amount || 0), 0);
 
-             afList.push({
-                 name: 'A.F. NO. 51',
-                 minOr: startOr2,
-                 maxOr: endOr2,
-                 amount: r2Data.total,
-                 qty: r2Data.count,
-                 
-                 begQty: undefined, begFrom: undefined, begTo: undefined,
-                 issQty, issFrom: issFromStr, issTo: issToStr,
-                 endQty, endFrom: endFromStr, endTo: lastOrStr
+                     afList.push({
+                         name: af,
+                         minOr: entry.issFrom,
+                         maxOr: entry.issTo,
+                         amount: entryAmount,
+                         qty: entry.issQty,
+                         
+                         begQty: entry.begQty,
+                         begFrom: entry.begFrom,
+                         begTo: entry.begTo,
+                         issQty: entry.issQty,
+                         issFrom: entry.issFrom,
+                         issTo: entry.issTo,
+                         endQty: entry.endQty,
+                         endFrom: entry.endFrom,
+                         endTo: entry.endTo
+                     });
+                 });
              });
-         }
-    } else {
-        Object.entries(itemsByAf).forEach(([af, items]) => {
-            // Sort items by OR
-            items.sort((a, b) => {
-                 const orA = a.orNo || '';
-                 const orB = b.orNo || '';
-                 const numA = parseInt(orA, 10);
-                 const numB = parseInt(orB, 10);
-                 if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
-                 return orA.localeCompare(orB);
-            });
-    
-            // Group into ranges
-            let currentRange: { min: string, max: string, amount: number, qty: number, lastOrNum: number } | null = null;
-            
-            for (const item of items) {
-                const orVal = item.orNo || '';
-                const orNum = parseInt(orVal, 10);
-                const amt = item.amount || 0;
-    
-                if (!currentRange) {
-                    currentRange = { min: orVal, max: orVal, amount: amt, qty: 1, lastOrNum: isNaN(orNum) ? -999999 : orNum };
-                } else {
-                    const isConsecutive = !isNaN(orNum) && !isNaN(currentRange.lastOrNum) && (orNum === currentRange.lastOrNum + 1);
-                    
-                    if (isConsecutive) {
-                        currentRange.max = orVal;
-                        currentRange.amount += amt;
-                        currentRange.qty += 1;
-                        currentRange.lastOrNum = orNum;
-                    } else {
-                        afList.push({
-                            name: af,
-                            minOr: currentRange.min,
-                            maxOr: currentRange.max,
-                            amount: currentRange.amount,
-                            qty: currentRange.qty
-                        });
-                        currentRange = { min: orVal, max: orVal, amount: amt, qty: 1, lastOrNum: isNaN(orNum) ? -999999 : orNum };
-                    }
-                }
-            }
-            
-            if (currentRange) {
-                 afList.push({
-                    name: af,
-                    minOr: currentRange.min,
-                    maxOr: currentRange.max,
-                    amount: currentRange.amount,
-                    qty: currentRange.qty
-                });
-            }
-        });
-        
-        // Sort final list by Name then by minOr
-        afList.sort((a, b) => {
-            const nameComp = a.name.localeCompare(b.name);
-            if (nameComp !== 0) return nameComp;
-            return parseInt(a.minOr, 10) - parseInt(b.minOr, 10);
-        });
-    }
+         });
+         
+         // Sort final list by Name then by minOr
+         afList.sort((a, b) => {
+             const nameComp = a.name.localeCompare(b.name);
+             if (nameComp !== 0) return nameComp;
+             return parseInt(a.minOr, 10) - parseInt(b.minOr, 10);
+         });
+     }
 
     const sortedEntries = Object.values(accountEntries)
         .filter(entry => entry.amount !== 0)
@@ -733,6 +809,14 @@ export const ReportsPage: React.FC = () => {
     const treasurer = signatories.find(s => 
         s.position.toLowerCase().includes('treasurer')
     ) || signatories.find(s => s.id !== collector.id) || { fullName: '______________________', position: 'Treasurer' };
+
+    const accountingHead = signatories.find(s => 
+        s.position.toLowerCase().includes('accounting')
+    ) || signatories[1] || { fullName: '______________________', position: 'Accounting Head' };
+
+    const preparedBy = signatories.find(s =>
+        s.id === 3
+    ) || collector;
 
     const printWindow = window.open('', '_blank');
     if (printWindow) {
@@ -955,7 +1039,7 @@ export const ReportsPage: React.FC = () => {
                 </thead>
                 <tbody>
                     <!-- Filler rows -->
-                    ${Array(12).fill(0).map(() => `
+                    ${Array(10).fill(0).map(() => `
                     <tr><td>&nbsp;</td><td></td><td></td></tr> 
                     `).join('')}
                     
@@ -997,7 +1081,7 @@ export const ReportsPage: React.FC = () => {
                 <tbody>
                     ${afList.map(item => `
                     <tr> 
-                        <td>A.F. NO. 51</td> 
+                        <td>${item.name || 'A.F. NO. 51'}</td> 
                         <td>${item.begQty || ''}</td><td>${item.begFrom || ''}</td><td>${item.begTo || ''}</td> 
                         <td></td><td></td><td></td> 
                         <td class="center">${item.issQty || ''}</td><td class="center">${item.issFrom || ''}</td><td class="center">${item.issTo || ''}</td> 
@@ -1173,13 +1257,13 @@ export const ReportsPage: React.FC = () => {
                 <tr>
                     <td width="50%" style="vertical-align: top;">
                         Prepared by:<br><br><br>
-                        <strong>SISTINE A. LINGON</strong><br>
-                        Admin Aide IV
+                        <strong>${preparedBy.fullName}</strong><br>
+                        ${preparedBy.position}
                     </td>
                     <td width="50%" style="vertical-align: top;">
                         Certified Correct:<br><br><br>
-                        <strong>LEON F. PAZ, JR.</strong><br>
-                        Chief, Accounting Department/Unit
+                        <strong>${accountingHead.fullName}</strong><br>
+                        ${accountingHead.position}
                     </td>
                 </tr>
             </table>
@@ -1227,8 +1311,10 @@ export const ReportsPage: React.FC = () => {
     const printContent = (_rangeLabel: string, start: string | null, end: string | null, total: number) => {
       if (!start || !end) return '';
 
-      const basic = total / 2;
-      const sef = total / 2;
+      // Calculate basic share (round up for odd cents)
+      const basic = Math.round(total * 100 / 2) / 100;
+      // SEF share is the remainder
+      const sef = Number((total - basic).toFixed(2));
 
       return `
       <div class="column">
@@ -1337,9 +1423,10 @@ export const ReportsPage: React.FC = () => {
     }
   };
 
-  const handlePrintRptReport = () => {
+  const handlePrintRptReport = (type: 'GENERAL' | 'SEF' | 'BOTH' = 'GENERAL') => {
     if (!rptFilterAf56Id) return;
     const afNo = rptFilterAf56Id;
+    setRptReportMenuAnchor(null);
 
     const filterByRange = (sOr: string | null, eOr: string | null) => {
       if (!sOr || !eOr) return [];
@@ -1373,23 +1460,70 @@ export const ReportsPage: React.FC = () => {
     const generateReportHtml = (fundType: 'GENERAL' | 'SEF', items: RPTCollectionItem[]) => {
       const isGeneral = fundType === 'GENERAL';
       const fundLabel = isGeneral ? 'GENERAL FUND' : 'SPECIAL EDUCATION FUND';
-      
-      // Calculate totals for this fund type (50% of total amount)
-      const reportItems = items.map(item => ({
-        ...item,
-        amount: (item.amount || 0) / 2
-      }));
-      
-      const totalAmount = reportItems.reduce((sum, item) => sum + item.amount, 0);
+
+      // Keep Basic/SEF computation aligned with Print Cover:
+      // split each selected range total (not each individual OR item).
+      const splitByFund = (total: number) => {
+        const basic = Math.round(total * 100 / 2) / 100;
+        const sef = Number((total - basic).toFixed(2));
+        return { basic, sef };
+      };
+
+      const getFundAmountForRange = (rangeItems: RPTCollectionItem[]) => {
+        const rangeTotal = rangeItems.reduce((sum, item) => sum + (item.amount || 0), 0);
+        const split = splitByFund(rangeTotal);
+        return isGeneral ? split.basic : split.sef;
+      };
+
+      const r1FundTotal = getFundAmountForRange(range1Data);
+      const r2FundTotal = getFundAmountForRange(range2Data);
+      const totalAmount = Number((r1FundTotal + r2FundTotal).toFixed(2));
 
       // Date Logic
-      const dateObj = reportItems.length > 0 && reportItems[0].date ? new Date(reportItems[0].date) : new Date();
-      const dateStr = dateObj.toLocaleDateString('en-PH', { month: 'long', year: 'numeric' });
-      const certificationDateStr = new Date().toLocaleDateString('en-PH', { month: '2-digit', day: '2-digit', year: 'numeric' });
+      let reportDateStr = new Date().toISOString().split('T')[0];
+      if (items.length > 0) {
+        const latestItem = items[items.length - 1];
+        if (latestItem.date) {
+          const s = String(latestItem.date).trim();
+          
+          // 1. Handle ISO strings with 'T'
+          if (s.includes('T')) {
+            const d = new Date(s);
+            if (!isNaN(d.getTime())) {
+              const month = String(d.getMonth() + 1).padStart(2, '0');
+              const day = String(d.getDate()).padStart(2, '0');
+              const year = d.getFullYear();
+              reportDateStr = `${year}-${month}-${day}`;
+            }
+          } else {
+            const cleanStr = s.split(' ')[0];
+            // Try YYYY-MM-DD
+            const ymd = cleanStr.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+            if (ymd) {
+              const [, y, m, d] = ymd;
+              reportDateStr = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+            } else {
+              // Try MM/DD/YYYY
+              const mdy = cleanStr.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+              if (mdy) {
+                const [, m, d, y] = mdy;
+                reportDateStr = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+              }
+            }
+          }
+        }
+      }
+
+      const [yFull, mNum] = reportDateStr.split('-');
+      const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      const dateStr = `${monthNames[parseInt(mNum, 10) - 1]} ${yFull}`;
+      
+      const now = new Date();
+      const certificationDateStr = `${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}/${now.getFullYear()}`;
       
       // Report No Logic
-      const yy = dateObj.getFullYear().toString().slice(-2);
-      const mm = (dateObj.getMonth() + 1).toString().padStart(2, '0');
+      const yy = yFull.slice(-2);
+      const mm = mNum;
       const reportNo = `${yy}-${mm}-`; 
 
       // Number to Words
@@ -1426,73 +1560,46 @@ export const ReportsPage: React.FC = () => {
           s.position.toLowerCase().includes('treasurer')
       ) || signatories.find(s => s.id !== collector.id) || { fullName: '______________________', position: 'Treasurer' };
 
+      const accountingHead = signatories.find(s => 
+          s.position.toLowerCase().includes('accounting')
+      ) || signatories[1] || { fullName: '______________________', position: 'Accounting Head' };
+
+      const preparedBy = signatories.find(s =>
+          s.id === 3
+      ) || collector;
+
       // Calculate OR Ranges for Section A
       // Simplified: Just use start/end ORs from the inputs since we know them
       const ranges = [];
       if (rptStartOr1 && rptEndOr1) {
-        const r1Items = reportItems.filter(i => {
-           const or = parseInt(i.orNumber, 10);
-           const s = parseInt(rptStartOr1!, 10);
-           const e = parseInt(rptEndOr1!, 10);
-           return or >= s && or <= e;
-        });
-        const r1Total = r1Items.reduce((sum, i) => sum + i.amount, 0);
-        ranges.push({ min: rptStartOr1, max: rptEndOr1, amount: r1Total });
+        ranges.push({ min: rptStartOr1, max: rptEndOr1, amount: r1FundTotal });
       }
       if (rptStartOr2 && rptEndOr2) {
-        const r2Items = reportItems.filter(i => {
-           const or = parseInt(i.orNumber, 10);
-           const s = parseInt(rptStartOr2!, 10);
-           const e = parseInt(rptEndOr2!, 10);
-           return or >= s && or <= e;
-        });
-        const r2Total = r2Items.reduce((sum, i) => sum + i.amount, 0);
-        ranges.push({ min: rptStartOr2, max: rptEndOr2, amount: r2Total });
+        ranges.push({ min: rptStartOr2, max: rptEndOr2, amount: r2FundTotal });
       }
 
       // Calculate Accountable Forms for Section C
-      // We need to simulate AF inventory.
-      // Since we don't have inventory state for AF 56, we'll derive "issued" from the selected range
-      // and placeholder logic for beg/end to match the style
-      const afRow = (sOr: string, eOr: string, rowIdx: number) => {
-          const startNum = parseInt(sOr, 10);
-          const endNum = parseInt(eOr, 10);
-          const qty = endNum - startNum + 1;
-          
-          // Placeholder Beginning: 50 qty range that includes this set?
-          // To make it look realistic without real data:
-          // Beg: Start OR to (Start + 49)
-          // Issued: Selected Range
-          // End: (End + 1) to (Start + 49)
-          const blockStart = Math.floor((startNum - 1) / 50) * 50 + 1; // Assuming 50 per pad
-          const blockEnd = blockStart + 49;
-          
-          const begQty = 50; // default pad size
-          const begFrom = blockStart.toString().padStart(7, '0');
-          const begTo = blockEnd.toString().padStart(7, '0');
+      const afName = `A.F. NO. ${afNo}`;
+      const afRows: string[] = [];
 
-          const issQty = qty;
-          const issFrom = sOr;
-          const issTo = eOr;
-
-          const endQty = blockEnd - endNum;
-          const endFrom = endQty > 0 ? (endNum + 1).toString().padStart(7, '0') : '';
-          const endTo = endQty > 0 ? blockEnd.toString().padStart(7, '0') : '';
-
-          return `
-            <tr> 
-                <td>A.F. NO. 56</td> 
-                <td>${rowIdx === 0 ? begQty : ''}</td><td>${rowIdx === 0 ? begFrom : ''}</td><td>${rowIdx === 0 ? begTo : ''}</td> 
-                <td></td><td></td><td></td> 
-                <td class="center">${issQty}</td><td class="center">${issFrom}</td><td class="center">${issTo}</td> 
-                <td>${endQty || ''}</td><td>${endFrom}</td><td>${endTo}</td> 
-            </tr> 
-          `;
+      const addAfRows = (sOr: string, eOr: string) => {
+          const padLen = sOr.length || 7;
+          const booklets = getBookletAccountability(sOr, eOr, padLen);
+          booklets.forEach(entry => {
+              afRows.push(`
+                <tr> 
+                    <td>${afName}</td> 
+                    <td>${entry.begQty || ''}</td><td>${entry.begFrom || ''}</td><td>${entry.begTo || ''}</td> 
+                    <td></td><td></td><td></td> 
+                    <td class="center">${entry.issQty || ''}</td><td class="center">${entry.issFrom || ''}</td><td class="center">${entry.issTo || ''}</td> 
+                    <td>${entry.endQty || ''}</td><td>${entry.endFrom || ''}</td><td>${entry.endTo || ''}</td> 
+                </tr> 
+              `);
+          });
       };
 
-      const afRows = [];
-      if (rptStartOr1 && rptEndOr1) afRows.push(afRow(rptStartOr1, rptEndOr1, 0));
-      if (rptStartOr2 && rptEndOr2) afRows.push(afRow(rptStartOr2, rptEndOr2, 1));
+      if (rptStartOr1 && rptEndOr1) addAfRows(rptStartOr1, rptEndOr1);
+      if (rptStartOr2 && rptEndOr2) addAfRows(rptStartOr2, rptEndOr2);
 
       return `
         <div style="text-align: right; font-size: 12px; font-weight: bold; margin-bottom: 2px;">Appendix 34</div>
@@ -1593,7 +1700,7 @@ export const ReportsPage: React.FC = () => {
                     </tr> 
                 </thead>
                 <tbody>
-                    ${Array(12).fill(0).map(() => `
+                    ${Array(10).fill(0).map(() => `
                     <tr><td>&nbsp;</td><td></td><td></td></tr> 
                     `).join('')}
                     <tr> 
@@ -1749,13 +1856,13 @@ export const ReportsPage: React.FC = () => {
                     </tr>
                     ${isGeneral ? `
                     <tr> 
-                        <td class="left">Due to LGUs Barangay</td> 
+                        <td class="left" style="padding-left: 20px;">Due to LGUs Barangay</td> 
                         <td class="center">2-02-01-070</td> 
                         <td class="right"></td> 
                         <td class="right"></td> 
                     </tr>
                     <tr> 
-                        <td class="left">Due to LGUs Province</td> 
+                        <td class="left" style="padding-left: 20px;">Due to LGUs Province</td> 
                         <td class="center">2-02-01-070</td> 
                         <td class="right"></td> 
                         <td class="right"></td> 
@@ -1774,31 +1881,13 @@ export const ReportsPage: React.FC = () => {
                     </tr>
                     <tr> 
                         <td class="left">Tax Revenue-Fines and Penalties Property Tax</td> 
-                        <td class="center">40-01-05-020</td> 
+                        <td class="center">4-01-05-020</td> 
                         <td class="right"></td> 
                         <td class="right"></td> 
                     </tr>
                     ` : `
-                    <tr> 
-                        <td class="left">Special Education Tax</td> 
-                        <td class="center">4-01-02-050</td> 
-                        <td class="right"></td> 
-                        <td class="right"></td> 
-                    </tr>
-                    <tr> 
-                        <td class="left">Discount on Special Education Tax</td> 
-                        <td class="center">4-01-02-051</td> 
-                        <td class="right"></td> 
-                        <td class="right"></td> 
-                    </tr>
-                    <tr> 
-                        <td class="left">Tax Revenue-Fines and Penalties Property Tax</td> 
-                        <td class="center">40-01-05-020</td> 
-                        <td class="right"></td> 
-                        <td class="right"></td> 
-                    </tr>
                     `}
-                    ${Array(isGeneral ? 18 : 20).fill(0).map(() => `<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>`).join('')}
+                    ${Array(isGeneral ? 16 : 21).fill(0).map(() => `<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>`).join('')}
                 </tbody>
             </table> 
             <div class="spacer"></div>
@@ -1807,13 +1896,13 @@ export const ReportsPage: React.FC = () => {
                 <tr>
                     <td width="50%" style="vertical-align: top;">
                         Prepared by:<br><br><br>
-                        <strong>SISTINE A. LINGON</strong><br>
-                        Admin Aide IV
+                        <strong>${preparedBy.fullName}</strong><br>
+                        ${preparedBy.position}
                     </td>
                     <td width="50%" style="vertical-align: top;">
                         Certified Correct:<br><br><br>
-                        <strong>LEON F. PAZ, JR.</strong><br>
-                        Chief, Accounting Department/Unit
+                        <strong>${accountingHead.fullName}</strong><br>
+                        ${accountingHead.position}
                     </td>
                 </tr>
             </table>
@@ -1824,6 +1913,11 @@ export const ReportsPage: React.FC = () => {
     const generalHtml = generateReportHtml('GENERAL', allData);
     const sefHtml = generateReportHtml('SEF', allData);
 
+    let finalHtml = '';
+    if (type === 'GENERAL') finalHtml = generalHtml;
+    else if (type === 'SEF') finalHtml = sefHtml;
+    else finalHtml = `${generalHtml}<div class="page-break"></div>${sefHtml}`;
+
     const printWindow = window.open('', '_blank');
     if (printWindow) {
       printWindow.document.write(`
@@ -1831,7 +1925,7 @@ export const ReportsPage: React.FC = () => {
         <html lang="en"> 
         <head> 
         <meta charset="UTF-8"> 
-        <title>RPT Reports - General & SEF</title> 
+        <title>RPT Reports - ${type === 'BOTH' ? 'General & SEF' : type}</title> 
         <style> 
             @page { 
                 size: 8.5in 13in; 
@@ -1871,9 +1965,7 @@ export const ReportsPage: React.FC = () => {
         </style> 
         </head> 
         <body> 
-            ${generalHtml}
-            <div class="page-break"></div>
-            ${sefHtml}
+            ${finalHtml}
         </body> 
         </html>
       `);
@@ -1881,6 +1973,76 @@ export const ReportsPage: React.FC = () => {
       printWindow.focus();
       printWindow.print();
     }
+  };
+
+  const handleExportToExcel = () => {
+    if (filteredCollections.length === 0) return;
+
+    // Helper to format date for Excel
+    const formatExcelDate = (dateStr: string | undefined): string => {
+      if (!dateStr) return '';
+      const s = String(dateStr).trim();
+      
+      // 1. Handle ISO strings with 'T'
+      if (s.includes('T')) {
+        const d = new Date(s);
+        if (!isNaN(d.getTime())) {
+          const month = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          const year = d.getFullYear();
+          return `${month}/${day}/${year}`;
+        }
+      }
+
+      // 2. Handle simple strings (remove time part if any)
+      const cleanStr = s.split(' ')[0];
+
+      // Try YYYY-MM-DD
+      const ymd = cleanStr.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+      if (ymd) {
+        const [, y, m, d] = ymd;
+        return `${m.padStart(2, '0')}/${d.padStart(2, '0')}/${y}`;
+      }
+      
+      // Try MM/DD/YYYY
+      const mdy = cleanStr.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+      if (mdy) {
+        const [, m, d, y] = mdy;
+        return `${m.padStart(2, '0')}/${d.padStart(2, '0')}/${y}`;
+      }
+
+      return cleanStr;
+    };
+
+    // Prepare data for export
+    const exportData = filteredCollections.map(item => ({
+      'OR Number': item.orNo,
+      'Date': formatExcelDate(item.date),
+      'Sub Category': item.subCategory,
+      'Main Category': item.mainCategory,
+      'Account Code': item.accountCode,
+      'Amount': item.amount
+    }));
+
+    // Create worksheet
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    
+    // Create workbook
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Collection Details");
+
+    // Generate filename based on date range if available
+    let filename = "Collection_Details.xlsx";
+    if (startDate && endDate) {
+      filename = `Collection_Details_${startDate}_to_${endDate}.xlsx`;
+    } else if (startDate) {
+      filename = `Collection_Details_from_${startDate}.xlsx`;
+    } else if (endDate) {
+      filename = `Collection_Details_until_${endDate}.xlsx`;
+    }
+
+    // Export file
+    XLSX.writeFile(workbook, filename);
   };
 
   return (
@@ -1994,11 +2156,21 @@ export const ReportsPage: React.FC = () => {
               <Button
                 variant="contained"
                 color="secondary"
-                onClick={handlePrintRptReport}
+                onClick={(e) => setRptReportMenuAnchor(e.currentTarget)}
                 disabled={!rptStartOr1 || !rptEndOr1}
               >
                 Print Report
               </Button>
+              <Menu
+                anchorEl={rptReportMenuAnchor}
+                open={Boolean(rptReportMenuAnchor)}
+                onClose={() => setRptReportMenuAnchor(null)}
+              >
+                <MenuItem onClick={() => handlePrintRptReport('GENERAL')}>General Report (Basic)</MenuItem>
+                <MenuItem onClick={() => handlePrintRptReport('SEF')}>SEF Report (SEF)</MenuItem>
+                <Divider />
+                <MenuItem onClick={() => handlePrintRptReport('BOTH')}>Print Both</MenuItem>
+              </Menu>
             </>
           )}
         </Box>
@@ -2220,6 +2392,17 @@ export const ReportsPage: React.FC = () => {
                         onChange={(e) => setEndDate(e.target.value)}
                       />
                     </Box>
+
+                    <Button 
+                      variant="contained" 
+                      color="success" 
+                      startIcon={<FileDownload />}
+                      onClick={handleExportToExcel}
+                      disabled={filteredCollections.length === 0}
+                      sx={{ height: 40 }}
+                    >
+                      Export to Excel
+                    </Button>
 
                     <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', minWidth: '300px', ml: 'auto' }}>
                       <Typography variant="h6" fontWeight="bold" color="text.secondary" sx={{ mr: 2 }}>

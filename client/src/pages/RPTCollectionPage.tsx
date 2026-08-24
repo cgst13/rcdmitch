@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Box, 
   Typography, 
@@ -33,12 +33,91 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { getRPTCollections, saveRPTCollection, deleteRPTCollection } from '../services/googleSheets';
 import type { RPTCollectionItem } from '../types/rcd';
 
+// Date Format Helpers
+ const formatToMmDdYyyy = (dateStr: string | undefined): string => {
+    if (!dateStr) return '';
+    
+    const s = String(dateStr).trim();
+    
+    // 1. Handle ISO strings with 'T' - these are likely shifted UTC dates
+    if (s.includes('T')) {
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) {
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const year = d.getFullYear();
+        return `${month}/${day}/${year}`;
+      }
+    }
+
+    // 2. Handle simple date strings (remove time part if any)
+    const cleanStr = s.split(' ')[0];
+    
+    // Try YYYY-MM-DD
+    const ymd = cleanStr.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+    if (ymd) {
+      const [, y, m, d] = ymd;
+      return `${m.padStart(2, '0')}/${d.padStart(2, '0')}/${y}`;
+    }
+    
+    // Try MM/DD/YYYY
+    const mdy = cleanStr.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+    if (mdy) {
+      const [, m, d, y] = mdy;
+      return `${m.padStart(2, '0')}/${d.padStart(2, '0')}/${y}`;
+    }
+
+    return cleanStr;
+  };
+  
+  const parseDateToInputFormat = (dateStr: string | undefined): string => {
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    
+    if (!dateStr) return today;
+    
+    const s = String(dateStr).trim();
+
+    // 1. Handle ISO strings with 'T'
+    if (s.includes('T')) {
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) {
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const year = d.getFullYear();
+        return `${year}-${month}-${day}`;
+      }
+    }
+
+    // 2. Handle simple strings
+    const cleanStr = s.split(' ')[0];
+
+    // Try YYYY-MM-DD
+    const ymd = cleanStr.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+    if (ymd) {
+      const [, y, m, d] = ymd;
+      return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    }
+    
+    // Try MM/DD/YYYY
+    const mdy = cleanStr.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+    if (mdy) {
+      const [, m, d, y] = mdy;
+      return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    }
+
+    return today;
+  };
+
 export const RPTCollectionPage: React.FC = () => {
   const [collections, setCollections] = useState<RPTCollectionItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [showEntryForm, setShowEntryForm] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [currentId, setCurrentId] = useState<number | null>(null);
+
+  // Form Ref for focusing
+  const payorInputRef = useRef<HTMLInputElement>(null);
 
   // Pagination State
   const [page, setPage] = useState(0);
@@ -51,6 +130,11 @@ export const RPTCollectionPage: React.FC = () => {
 
   // Derived State for Filters
   const uniqueAF56Ids = Array.from(new Set(collections.map(c => c.af56Id).filter(Boolean))).sort();
+
+  // Suggestions State
+  const payorSuggestions = Array.from(new Set(collections.map(c => c.payor).filter(Boolean))).sort();
+  const barangaySuggestions = Array.from(new Set(collections.map(c => c.barangay).filter(Boolean))).sort();
+  const landNameSuggestions = Array.from(new Set(collections.map(c => c.landName).filter(Boolean))).sort();
 
   // Delete Dialog State
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -91,20 +175,49 @@ export const RPTCollectionPage: React.FC = () => {
   }, []);
 
   const handleOpen = () => {
+    // Autofill from latest record
+    let latestRecord: RPTCollectionItem | null = null;
+    if (collections.length > 0) {
+      // Sort by date and then by ID to find the latest
+      const sorted = [...collections].sort((a, b) => {
+        const s1 = parseDateToInputFormat(a.date);
+        const s2 = parseDateToInputFormat(b.date);
+        if (s2 !== s1) return s2.localeCompare(s1);
+        return b.id - a.id;
+      });
+      latestRecord = sorted[0];
+    }
+
+    // Calculate next OR number
+    let nextOr = '';
+    if (latestRecord?.orNumber) {
+      const currentOr = parseInt(latestRecord.orNumber, 10);
+      if (!isNaN(currentOr)) {
+        nextOr = String(currentOr + 1).padStart(8, '0');
+      }
+    }
+
     setFormData({
-      af56Id: '',
-      orNumber: '',
+      af56Id: latestRecord?.af56Id || '',
+      orNumber: nextOr, // Use incremented OR with padding
       payor: '',
       barangay: '',
       landName: '',
       tdNumber: '',
       yearsPaid: '',
       amount: 0,
-      date: new Date().toISOString().split('T')[0],
+      date: parseDateToInputFormat(latestRecord?.date),
       remarks: ''
     });
     setIsEditing(false);
     setShowEntryForm(true);
+    
+    // Small delay to ensure form is rendered before focusing
+    setTimeout(() => {
+      if (payorInputRef.current) {
+        payorInputRef.current.focus();
+      }
+    }, 100);
   };
 
   const handleEdit = (item: RPTCollectionItem) => {
@@ -117,7 +230,7 @@ export const RPTCollectionPage: React.FC = () => {
       tdNumber: item.tdNumber,
       yearsPaid: item.yearsPaid,
       amount: item.amount,
-      date: item.date,
+      date: parseDateToInputFormat(item.date),
       remarks: item.remarks || ''
     });
     setCurrentId(item.id);
@@ -157,18 +270,65 @@ export const RPTCollectionPage: React.FC = () => {
   const handleSave = async () => {
     setLoading(true);
     try {
+      // Calculate next ID
+      let nextId = Date.now();
+      if (!isEditing) {
+        const maxId = collections.reduce((max, c) => Math.max(max, c.id), 0);
+        nextId = maxId + 1;
+      }
+
       const collection: RPTCollectionItem = {
-        id: isEditing && currentId ? currentId : Date.now(),
-        ...formData
+        id: isEditing && currentId ? currentId : nextId,
+        ...formData,
+        date: formatToMmDdYyyy(formData.date) // Store in sheet as mm/dd/yyyy
       };
       
       await saveRPTCollection(collection);
       await loadCollections();
-      setShowEntryForm(false);
+      
+      if (isEditing) {
+        setShowEntryForm(false);
+        setIsEditing(false);
+        setCurrentId(null);
+      } else {
+        // For new entries, keep the form open but reset and focus Payor
+        // Increment OR Number automatically if it's numeric
+        let nextOrNumber = formData.orNumber;
+        const orNum = parseInt(formData.orNumber, 10);
+        if (!isNaN(orNum)) {
+          nextOrNumber = String(orNum + 1).padStart(8, '0'); // Always 8 digits
+        }
+
+        setFormData({
+          ...formData,
+          orNumber: nextOrNumber,
+          payor: '',
+          barangay: '',
+          landName: '',
+          tdNumber: '',
+          yearsPaid: '',
+          amount: 0,
+          remarks: ''
+        });
+        
+        // Refocus the payor field
+        setTimeout(() => {
+          if (payorInputRef.current) {
+            payorInputRef.current.focus();
+          }
+        }, 100);
+      }
     } catch (error) {
       console.error('Failed to save collection', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && isFormValid && !loading) {
+      e.preventDefault();
+      handleSave();
     }
   };
 
@@ -191,10 +351,17 @@ export const RPTCollectionPage: React.FC = () => {
       (item.landName?.toLowerCase().includes(searchTerm.toLowerCase()) || '') ||
       (item.barangay?.toLowerCase().includes(searchTerm.toLowerCase()) || '');
     
-    const matchesDate = filterDate ? item.date.startsWith(filterDate) : true;
+    // Normalize date for month/year filtering
+    const normalizedDate = parseDateToInputFormat(item.date);
+    const matchesDate = filterDate ? normalizedDate.startsWith(filterDate) : true;
     const matchesAF56Id = filterAF56Id ? item.af56Id === filterAF56Id : true;
 
     return matchesSearch && matchesDate && matchesAF56Id;
+  }).sort((a, b) => {
+    const s1 = parseDateToInputFormat(a.date);
+    const s2 = parseDateToInputFormat(b.date);
+    if (s2 !== s1) return s2.localeCompare(s1);
+    return b.id - a.id;
   });
 
   const paginatedCollections = filteredCollections.slice(
@@ -203,6 +370,9 @@ export const RPTCollectionPage: React.FC = () => {
   );
 
   const totalAmount = filteredCollections.reduce((sum, item) => sum + (item.amount || 0), 0);
+
+  const isCancelled = formData.payor.trim().toUpperCase() === 'CANCELLED';
+  const isFormValid = formData.orNumber && formData.payor && (isCancelled || formData.amount > 0);
 
   const clearFilters = () => {
     setSearchTerm('');
@@ -265,6 +435,7 @@ export const RPTCollectionPage: React.FC = () => {
                         fullWidth
                         value={formData.date}
                         onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                        onKeyDown={handleKeyDown}
                         required
                         InputLabelProps={{ shrink: true }}
                     />
@@ -275,6 +446,7 @@ export const RPTCollectionPage: React.FC = () => {
                         fullWidth
                         value={formData.af56Id}
                         onChange={(e) => setFormData({ ...formData, af56Id: e.target.value })}
+                        onKeyDown={handleKeyDown}
                         required
                     />
                 </Grid>
@@ -284,32 +456,61 @@ export const RPTCollectionPage: React.FC = () => {
                         fullWidth
                         value={formData.orNumber}
                         onChange={(e) => setFormData({ ...formData, orNumber: e.target.value })}
+                        onKeyDown={handleKeyDown}
                         required
                     />
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6 }}>
-                    <TextField
-                        label="Payor"
-                        fullWidth
+                    <Autocomplete
+                        freeSolo
+                        options={payorSuggestions}
                         value={formData.payor}
-                        onChange={(e) => setFormData({ ...formData, payor: e.target.value })}
-                        required
+                        onInputChange={(_, newValue) => setFormData({ ...formData, payor: newValue })}
+                        onChange={(_, newValue) => setFormData({ ...formData, payor: newValue || '' })}
+                        renderInput={(params) => (
+                            <TextField
+                                {...params}
+                                inputRef={payorInputRef}
+                                label="Payor"
+                                onKeyDown={handleKeyDown}
+                                required
+                                fullWidth
+                            />
+                        )}
                     />
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6 }}>
-                    <TextField
-                        label="Barangay"
-                        fullWidth
+                    <Autocomplete
+                        freeSolo
+                        options={barangaySuggestions}
                         value={formData.barangay}
-                        onChange={(e) => setFormData({ ...formData, barangay: e.target.value })}
+                        onInputChange={(_, newValue) => setFormData({ ...formData, barangay: newValue })}
+                        onChange={(_, newValue) => setFormData({ ...formData, barangay: newValue || '' })}
+                        renderInput={(params) => (
+                            <TextField
+                                {...params}
+                                label="Barangay"
+                                onKeyDown={handleKeyDown}
+                                fullWidth
+                            />
+                        )}
                     />
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6 }}>
-                    <TextField
-                        label="Land Name"
-                        fullWidth
+                    <Autocomplete
+                        freeSolo
+                        options={landNameSuggestions}
                         value={formData.landName}
-                        onChange={(e) => setFormData({ ...formData, landName: e.target.value })}
+                        onInputChange={(_, newValue) => setFormData({ ...formData, landName: newValue })}
+                        onChange={(_, newValue) => setFormData({ ...formData, landName: newValue || '' })}
+                        renderInput={(params) => (
+                            <TextField
+                                {...params}
+                                label="Land Name"
+                                onKeyDown={handleKeyDown}
+                                fullWidth
+                            />
+                        )}
                     />
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6 }}>
@@ -318,6 +519,7 @@ export const RPTCollectionPage: React.FC = () => {
                         fullWidth
                         value={formData.tdNumber}
                         onChange={(e) => setFormData({ ...formData, tdNumber: e.target.value })}
+                        onKeyDown={handleKeyDown}
                     />
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6 }}>
@@ -326,6 +528,7 @@ export const RPTCollectionPage: React.FC = () => {
                         fullWidth
                         value={formData.yearsPaid}
                         onChange={(e) => setFormData({ ...formData, yearsPaid: e.target.value })}
+                        onKeyDown={handleKeyDown}
                     />
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6 }}>
@@ -335,6 +538,7 @@ export const RPTCollectionPage: React.FC = () => {
                         fullWidth
                         value={formData.amount}
                         onChange={(e) => setFormData({ ...formData, amount: parseFloat(e.target.value) || 0 })}
+                        onKeyDown={handleKeyDown}
                         required
                     />
                 </Grid>
@@ -346,6 +550,12 @@ export const RPTCollectionPage: React.FC = () => {
                         rows={2}
                         value={formData.remarks}
                         onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
+                        onKeyDown={(e) => {
+                          // Allow newline in remarks with Shift+Enter, but save on Enter
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            handleKeyDown(e);
+                          }
+                        }}
                     />
                 </Grid>
                 <Grid size={{ xs: 12 }}>
@@ -354,7 +564,7 @@ export const RPTCollectionPage: React.FC = () => {
                     <Button 
                       onClick={handleSave} 
                       variant="contained" 
-                      disabled={!formData.orNumber || !formData.payor || !formData.amount}
+                      disabled={!isFormValid}
                     >
                       {isEditing ? 'Update Entry' : 'Save Entry'}
                     </Button>
@@ -429,13 +639,14 @@ export const RPTCollectionPage: React.FC = () => {
                 <Table>
                     <TableHead>
                         <TableRow>
-                            <TableCell>ID</TableCell>
-                            <TableCell>Date</TableCell>
-                            <TableCell>Barangay</TableCell>
-                            <TableCell>Land Name</TableCell>
-                            <TableCell align="right">Amount</TableCell>
-                            <TableCell>Remarks</TableCell>
-                            <TableCell align="right">Actions</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold' }}>AF56 ID</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold' }}>OR Number</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold' }}>Date</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold' }}>Barangay</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold' }}>Land Name</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', textAlign: 'right' }}>Amount</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold' }}>Remarks</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', textAlign: 'right' }}>Actions</TableCell>
                         </TableRow>
                     </TableHead>
                     <TableBody>
@@ -446,8 +657,9 @@ export const RPTCollectionPage: React.FC = () => {
                                 onClick={() => { setSelectedItem(row); setViewDialogOpen(true); }}
                                 sx={{ cursor: 'pointer' }}
                             >
-                                <TableCell>{row.id}</TableCell>
-                                <TableCell>{row.date}</TableCell>
+                                <TableCell>{row.af56Id}</TableCell>
+                                <TableCell>{row.orNumber}</TableCell>
+                                <TableCell>{formatToMmDdYyyy(row.date)}</TableCell>
                                 <TableCell>{row.barangay}</TableCell>
                                 <TableCell>{row.landName}</TableCell>
                                 <TableCell align="right">₱ {(row.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</TableCell>
@@ -518,7 +730,7 @@ export const RPTCollectionPage: React.FC = () => {
                                             <Grid size={{ xs: 6 }} sx={{ textAlign: 'right' }}>
                                                 <Typography variant="caption" color="text.secondary">Date</Typography>
                                                 <Typography variant="body1">
-                                                    {selectedItem.date}
+                                                    {formatToMmDdYyyy(selectedItem.date)}
                                                 </Typography>
                                             </Grid>
                                         </Grid>

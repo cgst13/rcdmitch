@@ -1,4 +1,5 @@
-import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect } from 'react';
+import { HashRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { ThemeProvider, CssBaseline, CircularProgress, Box } from '@mui/material';
 import { theme } from './theme';
 import { LoginPage } from './pages/LoginPage';
@@ -13,7 +14,6 @@ import { Layout } from './components/Layout';
 import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './context/useAuth';
 
-// Protected Route Component
 const ProtectedRoute = ({ children }: { children: React.ReactElement }) => {
   const { user, isLoading } = useAuth();
 
@@ -27,12 +27,12 @@ const ProtectedRoute = ({ children }: { children: React.ReactElement }) => {
 
   if (!user) {
     return <Navigate to="/login" replace />;
+    
   }
 
   return children;
 };
 
-// Public Route (redirects to dashboard if already logged in)
 const PublicRoute = ({ children }: { children: React.ReactElement }) => {
   const { user, isLoading } = useAuth();
 
@@ -50,6 +50,27 @@ const PublicRoute = ({ children }: { children: React.ReactElement }) => {
 
   return children;
 };
+
+function TitleManager() {
+  const location = useLocation();
+
+  useEffect(() => {
+    const titles: Record<string, string> = {
+      '/login': 'Login',
+      '/dashboard': 'Dashboard',
+      '/collection': 'Collection',
+      '/rpt-collection': 'RPT Collection',
+      '/account-codes': 'Account Codes',
+      '/reports': 'Reports',
+      '/signatories': 'Signatories',
+      '/settings': 'Settings',
+    };
+    const pageTitle = titles[location.pathname] || 'Dashboard';
+    document.title = `RCD System - ${pageTitle}`;
+  }, [location.pathname]);
+
+  return null;
+}
 
 function AppRoutes() {
   return (
@@ -87,6 +108,7 @@ function App() {
       <CssBaseline />
       <AuthProvider>
         <Router>
+          <TitleManager />
           <AppRoutes />
         </Router>
       </AuthProvider>

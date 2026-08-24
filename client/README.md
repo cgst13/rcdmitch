@@ -8,13 +8,14 @@ This is a modern web application for the LGU Concepcion, Romblon.
 - Tailwind CSS (v4)
 - React Router DOM (Navigation)
 - Lucide React (Icons)
-- Google Sheets API (as Database)
+- Google Apps Script (Serverless Backend)
 
 ## Setup
 
 1.  Clone the repository.
 2.  Install dependencies:
     ```bash
+    cd client
     npm install
     ```
 3.  Start the development server:
@@ -22,32 +23,44 @@ This is a modern web application for the LGU Concepcion, Romblon.
     npm run dev
     ```
 
-## Google Sheets Integration
+## Backend Deployment (Google Apps Script)
 
-To connect a real Google Sheet, you need a **Google Cloud API Key** with **Google Sheets API** enabled.
+This project uses Google Apps Script as a serverless backend to communicate with Google Sheets.
 
-1.  **Create Google Sheet**:
+1.  **Prepare the Google Sheet**:
     - Create a new Google Sheet.
-    - Rename the first tab to `Users`.
-    - Add headers in the first row: `Email`, `Password`, `Name`, `Role`.
-    - Add a test user in row 2: `test@example.com`, `password123`, `Test User`, `collector`.
-    - **Share** the sheet: Make it "Anyone with the link can view" (Reader) OR ensure your API Key has access.
+    - Go to **Extensions > Apps Script**.
+    - Copy the content of `scripts/GAS_CODE.js` from this repository and paste it into the script editor (`Code.gs`).
+    - Save the project.
 
-2.  **Get Credentials**:
-    - Go to [Google Cloud Console](https://console.cloud.google.com/).
-    - Create a project.
-    - Enable **Google Sheets API**.
-    - Create Credentials -> **API Key**.
+2.  **Deploy as Web App**:
+    - Click **Deploy** > **New deployment**.
+    - Select **Web app**.
+    - Description: `RCD Backend v1`
+    - Execute as: **Me** (your email).
+    - Who has access: **Anyone** (this is required for the client to access it without OAuth complexity).
+    - Click **Deploy**.
+    - **Copy the Web App URL** (starts with `https://script.google.com/macros/s/...`).
 
 3.  **Configure Environment**:
-    - Create a `.env` file in the `client` folder (root of the frontend).
-    - Add your keys:
+    - Create a `.env` file in the `client` folder (copy `.env.example` if it exists, or just create it).
+    - Add your Web App URL:
     ```env
-    VITE_GOOGLE_SHEET_ID=your_spreadsheet_id_from_url
-    VITE_GOOGLE_API_KEY=your_google_cloud_api_key
+    VITE_GOOGLE_SCRIPT_URL=https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec
     ```
 
+## Frontend Deployment (GitHub Pages)
+
+To deploy the frontend to GitHub Pages:
+
+1.  Ensure your changes are committed.
+2.  Run the deploy script:
+    ```bash
+    npm run deploy
+    ```
+    This will build the project and push the `dist` folder to the `gh-pages` branch.
+
 ## Default Login (Mock)
-If no `.env` variables are provided, the app falls back to this mock user:
+If the backend is not connected or fails, the app may fall back to local storage or mock data.
 - Email: `admin@lgu.gov.ph`
 - Password: `admin`
