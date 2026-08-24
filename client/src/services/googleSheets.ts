@@ -8,16 +8,35 @@ export interface User {
   role: string;
 }
 
-// Service to handle Google Sheets interactions via Node.js Express Backend
-const getApiUrl = () => {
-  const envUrl = import.meta.env.VITE_API_URL || '';
-  if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
-    return envUrl;
+// Service to handle Google Sheets interactions via Node.js Express Backend or Google Apps Script Web App
+export const getApiUrl = (): string => {
+  const customUrl = localStorage.getItem('rcd_backend_url');
+  if (customUrl && customUrl.trim()) {
+    return customUrl.trim();
   }
+
+  const envUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_GOOGLE_SCRIPT_URL || '';
+  if (envUrl && envUrl.trim()) {
+    return envUrl.trim();
+  }
+
+  // If hosted on HTTPS (like GitHub Pages), default to empty or HTTPS GAS URL if available
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+    return '';
+  }
+
   if (typeof window !== 'undefined' && window.location.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
     return `http://${window.location.hostname}:5000`;
   }
-  return envUrl || 'http://localhost:5000';
+  return 'http://localhost:5000';
+};
+
+export const setApiUrl = (url: string): void => {
+  if (url && url.trim()) {
+    localStorage.setItem('rcd_backend_url', url.trim());
+  } else {
+    localStorage.removeItem('rcd_backend_url');
+  }
 };
 
 const clearLocalDatabaseCache = () => {
@@ -121,25 +140,46 @@ export const updateSpreadsheetConfig = async (urlOrId: string): Promise<{ succes
 };
 
 /**
- * Helper to call Node.js Backend API
+ * Helper to call Backend API (Node.js Express or Google Apps Script Web App)
  * All requests are POST with { action, ...payload }
  */
 const callApi = async (action: string, payload: Record<string, any> = {}) => {
   const targetUrl = getApiUrl();
 
+  // If page is HTTPS and targetUrl is unencrypted HTTP, browser will block (Mixed Content)
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:' && targetUrl.startsWith('http:')) {
+    console.warn(`Mixed Content Prevention (${action}): Unable to fetch HTTP endpoint "${targetUrl}" from HTTPS site.`);
+    return {
+      result: 'error',
+      message: 'Mixed Content Error: GitHub Pages runs on HTTPS and blocks connection to unencrypted http:// backends. Please configure your HTTPS Google Apps Script Web App URL in Settings.'
+    };
+  }
+
+  if (!targetUrl) {
+    if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+      return {
+        result: 'error',
+        message: 'No HTTPS API URL configured. Please set your Google Apps Script Web App URL in Settings.'
+      };
+    }
+    return null;
+  }
+
+  const isGas = targetUrl.includes('script.google.com');
+
   try {
     const options: RequestInit = {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: isGas
+        ? { 'Content-Type': 'text/plain;charset=utf-8' }
+        : { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, ...payload }),
     };
 
     const response = await fetch(targetUrl, options);
     const data = await response.json();
     return data;
-  } catch (error) {
+  } catch (error: any) {
     console.error(`API Error (${action}):`, error);
     return null;
   }

@@ -45,7 +45,9 @@ import { Notification } from '../components/Notification';
 import { 
   getSpreadsheetConfig, 
   updateSpreadsheetConfig, 
-  extractSpreadsheetId 
+  extractSpreadsheetId,
+  getApiUrl,
+  setApiUrl
 } from '../services/googleSheets';
 
 const SERVICE_ACCOUNT_EMAIL = 'credentials@rcd-lguconcepcion.iam.gserviceaccount.com';
@@ -63,6 +65,7 @@ export const SettingsPage: React.FC = () => {
   const [sheetInput, setSheetInput] = useState('');
   const [activeSheetId, setActiveSheetId] = useState('');
   const [activeSheetUrl, setActiveSheetUrl] = useState('');
+  const [apiUrlInput, setApiUrlInput] = useState(getApiUrl());
   const [isLoadingConfig, setIsLoadingConfig] = useState(true);
   const [isSavingSheet, setIsSavingSheet] = useState(false);
   const [isTestingConn, setIsTestingConn] = useState(false);
@@ -311,10 +314,10 @@ export const SettingsPage: React.FC = () => {
         {/* Service Account Permission Card */}
         <Box sx={{ mb: 3, p: 2, bgcolor: '#f0f4f9', borderRadius: 1.5, border: '1px solid #d3e3fd' }}>
           <Typography variant="caption" color="primary.main" fontWeight="bold" sx={{ display: 'block', mb: 0.5 }}>
-            REQUIRED: SHARE YOUR GOOGLE SHEET WITH SERVICE ACCOUNT
+            REQUIRED FOR NODE BACKEND: SHARE SHEET WITH SERVICE ACCOUNT
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            Before connecting a new sheet, open your Google Sheet in browser, click <strong>Share</strong>, and add this Service Account email with <strong>Editor</strong> access:
+            If using Node server backend, open your Google Sheet in browser, click <strong>Share</strong>, and add this Service Account email with <strong>Editor</strong> access:
           </Typography>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
             <Typography variant="body2" fontFamily="monospace" fontWeight="bold" sx={{ bgcolor: 'background.paper', px: 1.5, py: 0.8, borderRadius: 1, border: '1px solid', borderColor: 'divider', wordBreak: 'break-all', flex: 1 }}>
@@ -329,6 +332,30 @@ export const SettingsPage: React.FC = () => {
               Copy Email
             </Button>
           </Box>
+        </Box>
+
+        {/* Backend API / Google Apps Script Web App URL Card */}
+        <Box sx={{ mb: 3, p: 2, bgcolor: '#fef7e0', borderRadius: 1.5, border: '1px solid #feefc3' }}>
+          <Typography variant="caption" color="warning.dark" fontWeight="bold" sx={{ display: 'block', mb: 0.5 }}>
+            GOOGLE APPS SCRIPT WEB APP URL (REQUIRED FOR GITHUB PAGES ON OTHER DEVICES)
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            GitHub Pages is hosted over <strong>HTTPS</strong> and blocks unencrypted <code>http://localhost</code> connections on external devices. 
+            Deploying <code>scripts/GAS_CODE.js</code> as a Google Apps Script Web App gives you an <strong>HTTPS Web App URL</strong> accessible from any device anywhere!
+          </Typography>
+          
+          <TextField
+            fullWidth
+            size="small"
+            label="Google Apps Script Web App URL (HTTPS)"
+            placeholder="https://script.google.com/macros/s/AKfycb.../exec"
+            value={apiUrlInput}
+            onChange={(e) => {
+              setApiUrlInput(e.target.value);
+              setApiUrl(e.target.value);
+            }}
+            helperText="Paste your deployed Web App URL here to enable access from all devices."
+          />
         </Box>
 
         {/* Current Active Sheet Info */}
