@@ -9,7 +9,16 @@ export interface User {
 }
 
 // Service to handle Google Sheets interactions via Node.js Express Backend
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const getApiUrl = () => {
+  const envUrl = import.meta.env.VITE_API_URL || '';
+  if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
+    return envUrl;
+  }
+  if (typeof window !== 'undefined' && window.location.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    return `http://${window.location.hostname}:5000`;
+  }
+  return envUrl || 'http://localhost:5000';
+};
 
 const clearLocalDatabaseCache = () => {
   localStorage.removeItem('rcd_reports');
@@ -116,7 +125,7 @@ export const updateSpreadsheetConfig = async (urlOrId: string): Promise<{ succes
  * All requests are POST with { action, ...payload }
  */
 const callApi = async (action: string, payload: Record<string, any> = {}) => {
-  const targetUrl = API_URL || 'http://localhost:5000';
+  const targetUrl = getApiUrl();
 
   try {
     const options: RequestInit = {
